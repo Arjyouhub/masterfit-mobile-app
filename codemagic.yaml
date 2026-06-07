@@ -1,0 +1,52 @@
+# Codemagic configuration for MASTER FIT Expo Android Build
+# To build, push this code to your Git repository (GitHub, GitLab, Bitbucket), connect it to Codemagic, and trigger the build.
+
+workflows:
+  expo-android-apk:
+    name: Expo Android APK Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    
+    environment:
+      node: 20
+      groups:
+        # Define any signing environment variables here if needed
+        - android_credentials
+      vars:
+        # Default environment variables for Android build
+        PACKAGE_NAME: "com.anonymous.mobileapp"
+        
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+          value: true
+          
+    scripts:
+      - name: Set up npm cache
+        script: |
+          npm ci --legacy-peer-deps
+          
+      - name: Generate Android Native Project (Expo Prebuild)
+        script: |
+          # Bypasses interactive prompts and generates the native 'android' directory
+          npx expo prebuild --platform android --no-interactive
+          
+      - name: Build Android Debug APK
+        script: |
+          # Navigates to the generated native folder and compiles the APK
+          cd android
+          ./gradlew assembleDebug
+          
+    artifacts:
+      # Upload the compiled APK so you can download and install it on your device
+      - android/app/build/outputs/apk/debug/*.apk
+      
+    publishing:
+      email:
+        recipients:
+          # Add emails to receive notifications and download links
+          - arjx2@live.com
+        on_failure: true
+        on_success: true

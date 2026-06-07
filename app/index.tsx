@@ -127,26 +127,50 @@ export default function App() {
   const [attendanceRecords, setAttendanceRecords] = useState<Record<number, boolean>>({});
   const [isSavingAttendance, setIsSavingAttendance] = useState(false);
 
+  // Administrative credentials & collections
+  const [branchCredentials, setBranchCredentials] = useState<Record<string, { username: string; password?: string }>>({});
+  const [batchCredentials, setBatchCredentials] = useState<Record<string, { username: string; password?: string }>>({});
+  const [customBranches, setCustomBranches] = useState<string[]>([]);
+  const [customBatches, setCustomBatches] = useState<BatchOption[]>([]);
+
+  // Expanded Accordion active panel
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+
+  // Administrative form inputs
+  const [branchForm, setBranchForm] = useState({ branch: "kuttiady", newUsername: "", newPassword: "", confirmPassword: "" });
+  const [batchForm, setBatchForm] = useState({ branch: "kuttiady", batch: "batch1", newUsername: "", newPassword: "", confirmPassword: "" });
+  const [newBranchForm, setNewBranchForm] = useState({ name: "", username: "", password: "", confirmPassword: "" });
+  const [newBatchForm, setNewBatchForm] = useState({ name: "", schedule: "", branch: "kuttiady", username: "", password: "", confirmPassword: "" });
+
   // Fetch branches & custom batches from backend
   const fetchConfig = async () => {
     try {
       const res = await fetch(`${apiUrl}/credentials`);
       if (res.ok) {
         const data = await res.json();
-        const dbBranches = Object.keys(data.branchCredentials || {}).map(
-          (b) => b.charAt(0).toUpperCase() + b.slice(1)
-        );
-        const uniqueBranches = Array.from(
-          new Set([...DEFAULT_BRANCHES, ...dbBranches, ...(data.customBranches || [])])
-        );
-        setBranches(uniqueBranches);
 
-        const customBatchesList = (data.customBatches || []).map((b: any) => ({
+        // Credentials maps
+        setBranchCredentials(data.branchCredentials || {});
+        setBatchCredentials(data.batchCredentials || {});
+
+        // Custom lists
+        const dbCustomBranches = data.customBranches || [];
+        setCustomBranches(dbCustomBranches);
+        const dbCustomBatches = (data.customBatches || []).map((b: any) => ({
           id: b.id,
           name: b.name,
           schedule: b.schedule,
         }));
-        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...customBatchesList]);
+        setCustomBatches(dbCustomBatches);
+
+        const dbBranches = Object.keys(data.branchCredentials || {}).map(
+          (b) => b.charAt(0).toUpperCase() + b.slice(1)
+        );
+        const uniqueBranches = Array.from(
+          new Set([...DEFAULT_BRANCHES, ...dbBranches, ...dbCustomBranches])
+        );
+        setBranches(uniqueBranches);
+        setBatchOptions([...DEFAULT_BATCH_OPTIONS, ...dbCustomBatches]);
       }
     } catch (e) {
       console.log("Failed to load server branches, fallback to default", e);
@@ -157,6 +181,256 @@ export default function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchConfig();
   }, [apiUrl]);
+
+  // Admin settings update handlers
+  const handleUpdateBranchPassword = async () => {
+    const br = branchForm.branch.toLowerCase();
+    const pass = branchForm.newPassword;
+    const user = branchForm.newUsername.trim() || branchCredentials[br]?.username || `admin@${br}`;
+
+    if (!pass || pass !== branchForm.confirmPassword) {
+      Alert.alert("Error", "Passwords must match and cannot be empty.");
+      return;
+    }
+
+    const updatedBranchCreds = {
+      ...branchCredentials,
+      [br]: { username: user, password: pass }
+    };
+
+    try {
+      const res = await fetch(`${apiUrl}/credentials`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branchCredentials: updatedBranchCreds })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBranchCredentials(data.branchCredentials || {});
+        setBranchForm({ branch: br, newUsername: "", newPassword: "", confirmPassword: "" });
+        Alert.alert("Success", `Credentials for branch "${br.toUpperCase()}" updated successfully!`);
+      } else {
+        Alert.alert("Failed", "Could not update branch credentials.");
+      }
+    } catch {
+      Alert.alert("Network Error", "Could not save credentials to server.");
+    }
+  };
+
+  const handleUpdateBatchPassword = async () => {
+    const br = batchForm.branch.toLowerCase();
+    const bt = batchForm.batch;
+    const key = `${br}_${bt}`;
+    const pass = batchForm.newPassword;
+    const defaultUser = `${bt}@${br}`;
+    const user = batchForm.newUsername.trim() || batchCredentials[key]?.username || defaultUser;
+
+    if (!pass || pass !== batchForm.confirmPassword) {
+      Alert.alert("Error", "Passwords must match and cannot be empty.");
+      return;
+    }
+
+    const updatedBatchCreds = {
+      ...batchCredentials,
+      [key]: { username: user, password: pass }
+    };
+
+    try {
+      const res = await fetch(`${apiUrl}/credentials`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchCredentials: updatedBatchCreds })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBatchCredentials(data.batchCredentials || {});
+        setBatchForm({ branch: br, batch: bt, newUsername: "", newPassword: "", confirmPassword: "" });
+        Alert.alert("Success", `Credentials for batch "${bt}" updated successfully!`);
+      } else {
+        Alert.alert("Failed", "Could not update batch credentials.");
+      }
+    } catch {
+      Alert.alert("Network Error", "Could not save credentials to server.");
+    }
+  };
+
+  const handleAddCustomBranch = async () => {
+    const name = newBranchForm.name.trim();
+    const user = newBranchForm.username.trim();
+    const pass = newBranchForm.password;
+
+    if (!name || !pass || pass !== newBranchForm.confirmPassword) {
+      Alert.alert("Error", "Branch name and passwords are required, and passwords must match.");
+      return;
+    }
+
+    const newBrLower = name.toLowerCase();
+    if (branches.some(b => b.toLowerCase() === newBrLower)) {
+      Alert.alert("Error", "Branch already exists!");
+      return;
+    }
+
+    const defaultUser = `admin@${newBrLower}`;
+    const finalUser = user || defaultUser;
+
+    const updatedCustomBranches = [...customBranches, name];
+    const updatedBranchCreds = {
+      ...branchCredentials,
+      [newBrLower]: { username: finalUser, password: pass }
+    };
+
+    try {
+      const res = await fetch(`${apiUrl}/credentials`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customBranches: updatedCustomBranches,
+          branchCredentials: updatedBranchCreds
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomBranches(data.customBranches || []);
+        setBranchCredentials(data.branchCredentials || {});
+        setNewBranchForm({ name: "", username: "", password: "", confirmPassword: "" });
+        fetchConfig();
+        Alert.alert("Success", `Branch "${name}" created successfully!`);
+      } else {
+        Alert.alert("Failed", "Could not save custom branch.");
+      }
+    } catch {
+      Alert.alert("Network Error", "Failed to save branch to server.");
+    }
+  };
+
+  const handleDeleteCustomBranch = (branchToDelete: string) => {
+    if (DEFAULT_BRANCHES.includes(branchToDelete)) {
+      Alert.alert("Error", "Cannot delete default system branches!");
+      return;
+    }
+
+    Alert.alert(
+      "Delete Branch",
+      `Are you sure you want to delete branch "${branchToDelete}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const updatedCustomBranches = customBranches.filter(b => b !== branchToDelete);
+
+            try {
+              const res = await fetch(`${apiUrl}/credentials`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ customBranches: updatedCustomBranches })
+              });
+              if (res.ok) {
+                const data = await res.json();
+                setCustomBranches(data.customBranches || []);
+                fetchConfig();
+                Alert.alert("Deleted", `Branch "${branchToDelete}" removed successfully.`);
+              }
+            } catch {
+              Alert.alert("Error", "Could not remove branch from server.");
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleAddCustomBatch = async () => {
+    const name = newBatchForm.name.trim();
+    const schedule = newBatchForm.schedule.trim();
+    const br = newBatchForm.branch.toLowerCase();
+    const user = newBatchForm.username.trim();
+    const pass = newBatchForm.password;
+
+    if (!name || !schedule || !pass || pass !== newBatchForm.confirmPassword) {
+      Alert.alert("Error", "Batch name, schedule, and passwords are required, and passwords must match.");
+      return;
+    }
+
+    if (batchOptions.some(b => b.name.toLowerCase() === name.toLowerCase())) {
+      Alert.alert("Error", "A batch with this name already exists!");
+      return;
+    }
+
+    const id = "batch_" + Date.now();
+    const newBatchObj = { id, name, schedule };
+
+    const key = `${br}_${id}`;
+    const defaultUser = `${id}@${br}`;
+    const finalUser = user || defaultUser;
+
+    const updatedCustomBatches = [...customBatches, newBatchObj];
+    const updatedBatchCreds = {
+      ...batchCredentials,
+      [key]: { username: finalUser, password: pass }
+    };
+
+    try {
+      const res = await fetch(`${apiUrl}/credentials`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customBatches: updatedCustomBatches,
+          batchCredentials: updatedBatchCreds
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomBatches(data.customBatches || []);
+        setNewBatchForm({ name: "", schedule: "", branch: "kuttiady", username: "", password: "", confirmPassword: "" });
+        fetchConfig();
+        Alert.alert("Success", `Batch "${name}" created successfully!`);
+      } else {
+        Alert.alert("Failed", "Could not save custom batch.");
+      }
+    } catch {
+      Alert.alert("Network Error", "Failed to save batch to server.");
+    }
+  };
+
+  const handleDeleteCustomBatch = (batchIdToDelete: string, batchName: string) => {
+    if (DEFAULT_BATCH_OPTIONS.some(b => b.id === batchIdToDelete)) {
+      Alert.alert("Error", "Cannot delete default system batches!");
+      return;
+    }
+
+    Alert.alert(
+      "Delete Batch",
+      `Are you sure you want to delete batch "${batchName}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const updatedCustomBatches = customBatches.filter(b => b.id !== batchIdToDelete);
+
+            try {
+              const res = await fetch(`${apiUrl}/credentials`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ customBatches: updatedCustomBatches })
+              });
+              if (res.ok) {
+                const data = await res.json();
+                setCustomBatches(data.customBatches || []);
+                fetchConfig();
+                Alert.alert("Deleted", `Batch "${batchName}" removed successfully.`);
+              }
+            } catch {
+              Alert.alert("Error", "Could not remove batch from server.");
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // Load students data when logged in
   const fetchStudents = async () => {
@@ -1072,13 +1346,363 @@ export default function App() {
                 <Text style={styles.settingsGroupLabel}>Session Information</Text>
                 <View style={styles.sessionCard}>
                   <Text style={styles.sessionText}>
-                    Active Coordinator: <Text style={{ color: "#E50914" }}>{loggedInUser}</Text>
+                    Active Account: <Text style={{ color: "#E50914" }}>{loggedInUser}</Text>
                   </Text>
                   <Text style={styles.sessionText}>
                     Auth Mode: <Text style={{ color: "#FFD700" }}>{loginType}</Text>
                   </Text>
                 </View>
               </View>
+
+              {/* Administrative options rendered if Super Admin */}
+              {!loggedInUser?.includes("@") && (
+                <View style={{ gap: 16, marginTop: 12, marginBottom: 20 }}>
+                  <Text style={styles.sectionHeader}>Administrative Options</Text>
+
+                  {/* 1. Manage Branch Credentials */}
+                  <View style={styles.accordionContainer}>
+                    <TouchableOpacity
+                      style={styles.accordionHeader}
+                      onPress={() => setExpandedSection(expandedSection === "branchCreds" ? null : "branchCreds")}
+                    >
+                      <Text style={styles.accordionTitle}>Manage Branch Credentials</Text>
+                      <ChevronDown size={18} color="#FFFFFF" style={{ transform: [{ rotate: expandedSection === "branchCreds" ? "180deg" : "0deg" }] }} />
+                    </TouchableOpacity>
+                    {expandedSection === "branchCreds" && (
+                      <View style={styles.accordionContent}>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Select Branch</Text>
+                          <TouchableOpacity
+                            style={styles.enrollPickerTrigger}
+                            onPress={() =>
+                              openCustomPicker(
+                                "branch",
+                                branches.map((b) => ({ id: b, name: b })),
+                                (val) => setBranchForm({ ...branchForm, branch: val })
+                              )
+                            }
+                          >
+                            <Text style={styles.enrollPickerTriggerText}>{branchForm.branch}</Text>
+                            <ChevronDown size={16} color="#B0B0B0" />
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>New Username (Optional)</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder={`admin@${branchForm.branch}`}
+                            placeholderTextColor="#555555"
+                            value={branchForm.newUsername}
+                            onChangeText={(val) => setBranchForm({ ...branchForm, newUsername: val })}
+                          />
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>New Password</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder="Enter new password"
+                            placeholderTextColor="#555555"
+                            secureTextEntry
+                            value={branchForm.newPassword}
+                            onChangeText={(val) => setBranchForm({ ...branchForm, newPassword: val })}
+                          />
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Confirm Password</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder="Confirm new password"
+                            placeholderTextColor="#555555"
+                            secureTextEntry
+                            value={branchForm.confirmPassword}
+                            onChangeText={(val) => setBranchForm({ ...branchForm, confirmPassword: val })}
+                          />
+                        </View>
+                        <TouchableOpacity style={styles.enrollSaveButton} onPress={handleUpdateBranchPassword}>
+                          <Text style={styles.enrollSaveButtonText}>Save Branch Credentials</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* 2. Manage Batch Credentials */}
+                  <View style={styles.accordionContainer}>
+                    <TouchableOpacity
+                      style={styles.accordionHeader}
+                      onPress={() => setExpandedSection(expandedSection === "batchCreds" ? null : "batchCreds")}
+                    >
+                      <Text style={styles.accordionTitle}>Manage Batch Credentials</Text>
+                      <ChevronDown size={18} color="#FFFFFF" style={{ transform: [{ rotate: expandedSection === "batchCreds" ? "180deg" : "0deg" }] }} />
+                    </TouchableOpacity>
+                    {expandedSection === "batchCreds" && (
+                      <View style={styles.accordionContent}>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Select Branch</Text>
+                          <TouchableOpacity
+                            style={styles.enrollPickerTrigger}
+                            onPress={() =>
+                              openCustomPicker(
+                                "branch",
+                                branches.map((b) => ({ id: b, name: b })),
+                                (val) => setBatchForm({ ...batchForm, branch: val })
+                              )
+                            }
+                          >
+                            <Text style={styles.enrollPickerTriggerText}>{batchForm.branch}</Text>
+                            <ChevronDown size={16} color="#B0B0B0" />
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Select Batch</Text>
+                          <TouchableOpacity
+                            style={styles.enrollPickerTrigger}
+                            onPress={() =>
+                              openCustomPicker(
+                                "batch",
+                                batchOptions.map((b) => ({ id: b.id, name: b.name })),
+                                (val) => setBatchForm({ ...batchForm, batch: val })
+                              )
+                            }
+                          >
+                            <Text style={styles.enrollPickerTriggerText}>
+                              {batchOptions.find(b => b.id === batchForm.batch)?.name || batchForm.batch}
+                            </Text>
+                            <ChevronDown size={16} color="#B0B0B0" />
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>New Username (Optional)</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder={`${batchForm.batch}@${batchForm.branch}`}
+                            placeholderTextColor="#555555"
+                            value={batchForm.newUsername}
+                            onChangeText={(val) => setBatchForm({ ...batchForm, newUsername: val })}
+                          />
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>New Password</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder="Enter new password"
+                            placeholderTextColor="#555555"
+                            secureTextEntry
+                            value={batchForm.newPassword}
+                            onChangeText={(val) => setBatchForm({ ...batchForm, newPassword: val })}
+                          />
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Confirm Password</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder="Confirm new password"
+                            placeholderTextColor="#555555"
+                            secureTextEntry
+                            value={batchForm.confirmPassword}
+                            onChangeText={(val) => setBatchForm({ ...batchForm, confirmPassword: val })}
+                          />
+                        </View>
+                        <TouchableOpacity style={styles.enrollSaveButton} onPress={handleUpdateBatchPassword}>
+                          <Text style={styles.enrollSaveButtonText}>Save Batch Credentials</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* 3. Add & Manage Branches */}
+                  <View style={styles.accordionContainer}>
+                    <TouchableOpacity
+                      style={styles.accordionHeader}
+                      onPress={() => setExpandedSection(expandedSection === "addBranch" ? null : "addBranch")}
+                    >
+                      <Text style={styles.accordionTitle}>Add & Manage Branches</Text>
+                      <ChevronDown size={18} color="#FFFFFF" style={{ transform: [{ rotate: expandedSection === "addBranch" ? "180deg" : "0deg" }] }} />
+                    </TouchableOpacity>
+                    {expandedSection === "addBranch" && (
+                      <View style={styles.accordionContent}>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Branch Name</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder="e.g. Vatakara"
+                            placeholderTextColor="#555555"
+                            value={newBranchForm.name}
+                            onChangeText={(val) => setNewBranchForm({ ...newBranchForm, name: val })}
+                          />
+                        </View>
+                        <View style={styles.enrollFormGroup}>
+                          <Text style={styles.enrollFormLabel}>Username (Optional)</Text>
+                          <TextInput
+                            style={styles.enrollInput}
+                            placeholder="e.g. admin@vatakara"
+                            placeholderTextColor="#555555"
+                            value={newBranchForm.username}
+                            onChangeText={(val) => setNewBranchForm({ ...newBranchForm, username: val })}
+                          />
+                        </View>
+                        <View style={styles.formRow}>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Password</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="Enter password"
+                              placeholderTextColor="#555555"
+                              secureTextEntry
+                              value={newBranchForm.password}
+                              onChangeText={(val) => setNewBranchForm({ ...newBranchForm, password: val })}
+                            />
+                          </View>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Confirm</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="Confirm password"
+                              placeholderTextColor="#555555"
+                              secureTextEntry
+                              value={newBranchForm.confirmPassword}
+                              onChangeText={(val) => setNewBranchForm({ ...newBranchForm, confirmPassword: val })}
+                            />
+                          </View>
+                        </View>
+                        <TouchableOpacity style={styles.enrollSaveButton} onPress={handleAddCustomBranch}>
+                          <Text style={styles.enrollSaveButtonText}>Create Branch & Credentials</Text>
+                        </TouchableOpacity>
+
+                        <Text style={[styles.sectionHeader, { marginTop: 16 }]}>Custom Branches List</Text>
+                        {customBranches.length === 0 ? (
+                          <Text style={styles.emptyText}>No custom branches added yet.</Text>
+                        ) : (
+                          customBranches.map((brName) => (
+                            <View key={brName} style={styles.adminListRow}>
+                              <Text style={styles.adminListText}>{brName}</Text>
+                              <TouchableOpacity
+                                style={styles.adminListDeleteBtn}
+                                onPress={() => handleDeleteCustomBranch(brName)}
+                              >
+                                <Trash2 size={16} color="#E50914" />
+                              </TouchableOpacity>
+                            </View>
+                          ))
+                        )}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* 4. Add & Manage Batches */}
+                  <View style={styles.accordionContainer}>
+                    <TouchableOpacity
+                      style={styles.accordionHeader}
+                      onPress={() => setExpandedSection(expandedSection === "addBatch" ? null : "addBatch")}
+                    >
+                      <Text style={styles.accordionTitle}>Add & Manage Batches</Text>
+                      <ChevronDown size={18} color="#FFFFFF" style={{ transform: [{ rotate: expandedSection === "addBatch" ? "180deg" : "0deg" }] }} />
+                    </TouchableOpacity>
+                    {expandedSection === "addBatch" && (
+                      <View style={styles.accordionContent}>
+                        <View style={styles.formRow}>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Batch Name</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="e.g. Batch 4"
+                              placeholderTextColor="#555555"
+                              value={newBatchForm.name}
+                              onChangeText={(val) => setNewBatchForm({ ...newBatchForm, name: val })}
+                            />
+                          </View>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Schedule</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="e.g. Sat-Sun"
+                              placeholderTextColor="#555555"
+                              value={newBatchForm.schedule}
+                              onChangeText={(val) => setNewBatchForm({ ...newBatchForm, schedule: val })}
+                            />
+                          </View>
+                        </View>
+                        <View style={styles.formRow}>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Branch</Text>
+                            <TouchableOpacity
+                              style={styles.enrollPickerTrigger}
+                              onPress={() =>
+                                openCustomPicker(
+                                  "branch",
+                                  branches.map((b) => ({ id: b, name: b })),
+                                  (val) => setNewBatchForm({ ...newBatchForm, branch: val })
+                                )
+                              }
+                            >
+                              <Text style={styles.enrollPickerTriggerText} numberOfLines={1}>
+                                {newBatchForm.branch}
+                              </Text>
+                              <ChevronDown size={16} color="#B0B0B0" />
+                            </TouchableOpacity>
+                          </View>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Username (Optional)</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="Coordinator username"
+                              placeholderTextColor="#555555"
+                              value={newBatchForm.username}
+                              onChangeText={(val) => setNewBatchForm({ ...newBatchForm, username: val })}
+                            />
+                          </View>
+                        </View>
+                        <View style={styles.formRow}>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Password</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="Enter password"
+                              placeholderTextColor="#555555"
+                              secureTextEntry
+                              value={newBatchForm.password}
+                              onChangeText={(val) => setNewBatchForm({ ...newBatchForm, password: val })}
+                            />
+                          </View>
+                          <View style={styles.formRowHalf}>
+                            <Text style={styles.enrollFormLabel}>Confirm</Text>
+                            <TextInput
+                              style={styles.enrollInput}
+                              placeholder="Confirm password"
+                              placeholderTextColor="#555555"
+                              secureTextEntry
+                              value={newBatchForm.confirmPassword}
+                              onChangeText={(val) => setNewBatchForm({ ...newBatchForm, confirmPassword: val })}
+                            />
+                          </View>
+                        </View>
+                        <TouchableOpacity style={styles.enrollSaveButton} onPress={handleAddCustomBatch}>
+                          <Text style={styles.enrollSaveButtonText}>Create Batch & Credentials</Text>
+                        </TouchableOpacity>
+
+                        <Text style={[styles.sectionHeader, { marginTop: 16 }]}>Custom Batches List</Text>
+                        {customBatches.length === 0 ? (
+                          <Text style={styles.emptyText}>No custom batches added yet.</Text>
+                        ) : (
+                          customBatches.map((bt) => (
+                            <View key={bt.id} style={styles.adminListRow}>
+                              <View>
+                                <Text style={styles.adminListText}>{bt.name}</Text>
+                                <Text style={styles.adminListSubText}>Schedule: {bt.schedule}</Text>
+                              </View>
+                              <TouchableOpacity
+                                style={styles.adminListDeleteBtn}
+                                onPress={() => handleDeleteCustomBatch(bt.id, bt.name)}
+                              >
+                                <Trash2 size={16} color="#E50914" />
+                              </TouchableOpacity>
+                            </View>
+                          ))
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              )}
 
               <TouchableOpacity style={styles.logoutLargeBtn} onPress={handleLogout}>
                 <LogOut size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
@@ -2218,5 +2842,57 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
     fontSize: 15,
+  },
+  accordionContainer: {
+    backgroundColor: "#141414",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 12,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+  accordionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "#1A1A1A",
+  },
+  accordionTitle: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  accordionContent: {
+    padding: 16,
+    gap: 12,
+    backgroundColor: "#111111",
+  },
+  adminListRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#181818",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.04)",
+    marginTop: 8,
+  },
+  adminListText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  adminListSubText: {
+    color: "#B0B0B0",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  adminListDeleteBtn: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: "rgba(229, 9, 20, 0.1)",
   },
 });
