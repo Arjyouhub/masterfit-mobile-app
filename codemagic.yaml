@@ -29,8 +29,8 @@ workflows:
           
       - name: Generate Android Native Project (Expo Prebuild)
         script: |
-          # Bypasses interactive prompts and generates the native 'android' directory
-          npx expo prebuild --platform android --no-interactive
+          # Generates the native 'android' directory without running redundant npm installs
+          npx expo prebuild --platform android --no-install
           
       - name: Build Android Debug APK
         script: |
