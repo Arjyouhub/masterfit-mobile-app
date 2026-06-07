@@ -21,7 +21,6 @@ workflows:
         - push
       branch_patterns:
         - pattern: '*'
-          value: true
           
     scripts:
       - name: Set up npm cache
@@ -48,5 +47,3 @@ workflows:
         recipients:
           # Add emails to receive notifications and download links
           - arjx2@live.com
-        on_failure: true
-        on_success: true
