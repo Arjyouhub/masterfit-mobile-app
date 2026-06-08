@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MobileApp",
+    "name": "Masterfit",
     "slug": "MobileApp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -35,7 +35,8 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

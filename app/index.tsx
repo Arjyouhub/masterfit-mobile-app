@@ -17,6 +17,7 @@ import {
   Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import {
   Lock,
@@ -71,9 +72,7 @@ const DEFAULT_BATCH_OPTIONS: BatchOption[] = [
 
 export default function App() {
   // App Configurations & Connection
-  const [apiUrl, setApiUrl] = useState("https://masterfit-dfz7.onrender.com/api");
-  const [showConfigModal, setShowConfigModal] = useState(false);
-  const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
+  const apiUrl = "https://masterfit-dfz7.onrender.com/api";
 
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -181,6 +180,40 @@ export default function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchConfig();
   }, [apiUrl]);
+
+  useEffect(() => {
+    const checkLoginStatus = async () => {
+      try {
+        const storedToken = await SecureStore.getItemAsync("userToken");
+        const storedUser = await SecureStore.getItemAsync("loggedInUser");
+        const storedLoginType = await SecureStore.getItemAsync("loginType") as LoginType | null;
+        
+        if (storedToken && storedUser && storedLoginType) {
+          setToken(storedToken);
+          setLoggedInUser(storedUser);
+          setLoginType(storedLoginType);
+          setIsLoggedIn(true);
+
+          if (storedLoginType === "coordinator") {
+            const storedBranch = await SecureStore.getItemAsync("selectedBranchLogin");
+            const storedBatch = await SecureStore.getItemAsync("selectedBatchLogin");
+            if (storedBranch) {
+              setSelectedBranchFilter(storedBranch);
+              setAttendanceBranch(storedBranch);
+            }
+            if (storedBatch) {
+              setAttendanceBatch(storedBatch);
+            }
+          } else {
+            setSelectedBranchFilter("All");
+          }
+        }
+      } catch (e) {
+        console.log("Failed to load stored session", e);
+      }
+    };
+    checkLoginStatus();
+  }, []);
 
   // Admin settings update handlers
   const handleUpdateBranchPassword = async () => {
@@ -518,6 +551,18 @@ export default function App() {
         setLoggedInUser(data.username);
         setIsLoggedIn(true);
 
+        try {
+          await SecureStore.setItemAsync("userToken", data.token);
+          await SecureStore.setItemAsync("loggedInUser", data.username);
+          await SecureStore.setItemAsync("loginType", loginType);
+          if (loginType === "coordinator") {
+            await SecureStore.setItemAsync("selectedBranchLogin", selectedBranchLogin);
+            await SecureStore.setItemAsync("selectedBatchLogin", selectedBatchLogin);
+          }
+        } catch (e) {
+          console.log("Failed to save login session", e);
+        }
+
         // Autofill branch filter if coordinator
         if (loginType === "coordinator") {
           setSelectedBranchFilter(selectedBranchLogin);
@@ -549,6 +594,17 @@ export default function App() {
     } catch (e) {
       console.log("Logout api error", e);
     }
+    
+    try {
+      await SecureStore.deleteItemAsync("userToken");
+      await SecureStore.deleteItemAsync("loggedInUser");
+      await SecureStore.deleteItemAsync("loginType");
+      await SecureStore.deleteItemAsync("selectedBranchLogin");
+      await SecureStore.deleteItemAsync("selectedBatchLogin");
+    } catch (e) {
+      console.log("Failed to clear stored session", e);
+    }
+
     setToken(null);
     setLoggedInUser(null);
     setIsLoggedIn(false);
@@ -759,17 +815,6 @@ export default function App() {
         <View style={styles.darkOverlay} />
         <SafeAreaView style={styles.loginContainer}>
           <StatusBar style="light" />
-
-          {/* Config Settings Gear Button */}
-          <TouchableOpacity
-            style={styles.configBtn}
-            onPress={() => {
-              setTempApiUrl(apiUrl);
-              setShowConfigModal(true);
-            }}
-          >
-            <Settings size={22} color="#FFFFFF" />
-          </TouchableOpacity>
 
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -1324,22 +1369,7 @@ export default function App() {
             <ScrollView style={styles.tabContentContainer} showsVerticalScrollIndicator={false}>
               <View style={styles.panelCard}>
                 <Text style={styles.panelTitle}>System Settings</Text>
-                <Text style={styles.panelDesc}>Configure database endpoints and sync state.</Text>
-              </View>
-
-              <View style={styles.settingsGroup}>
-                <Text style={styles.settingsGroupLabel}>Connection Endpoint</Text>
-                <View style={styles.settingsInputWrapper}>
-                  <TextInput
-                    style={styles.settingsInput}
-                    value={apiUrl}
-                    onChangeText={setApiUrl}
-                    placeholder="Enter API endpoint URL"
-                  />
-                </View>
-                <Text style={styles.settingsHelpText}>
-                  Endpoint used for real-time DB queries and enrollment synchronization.
-                </Text>
+                <Text style={styles.panelDesc}>Manage branch credentials and view session info.</Text>
               </View>
 
               <View style={styles.settingsGroup}>
@@ -1789,45 +1819,7 @@ export default function App() {
         </Modal>
       )}
 
-      {/* API Server Endpoint Settings Modal */}
-      <Modal transparent visible={showConfigModal} animationType="slide">
-        <View style={styles.pickerOverlay}>
-          <View style={styles.configModalContent}>
-            <View style={styles.pickerHeaderRow}>
-              <Text style={styles.configModalTitle}>Configure Server Endpoint</Text>
-              <TouchableOpacity onPress={() => setShowConfigModal(false)}>
-                <X size={20} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
 
-            <View style={styles.configForm}>
-              <Text style={styles.configFormLabel}>Database API Base URL</Text>
-              <TextInput
-                style={styles.configInput}
-                value={tempApiUrl}
-                onChangeText={setTempApiUrl}
-                placeholder="e.g. http://10.0.2.2:5000/api"
-                placeholderTextColor="#555555"
-                autoCapitalize="none"
-              />
-              <Text style={styles.configHelpText}>
-                Use Render Cloud API address, or your local machine IP (e.g. http://10.0.2.2:5000/api for Android emulator).
-              </Text>
-
-              <TouchableOpacity
-                style={styles.configSaveBtn}
-                onPress={() => {
-                  setApiUrl(tempApiUrl);
-                  setShowConfigModal(false);
-                  Alert.alert("Saved", "API connection endpoint updated.");
-                }}
-              >
-                <Text style={styles.configSaveBtnText}>Save Configuration</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Enroll Student Form Modal */}
       <Modal transparent visible={showEnrollModal} animationType="slide">
