@@ -15,6 +15,9 @@ workflows:
       vars:
         # Default environment variables for Android build
         PACKAGE_NAME: "com.anonymous.mobileapp"
+      android_signing:
+        # Reference name of the keystore uploaded in Codemagic UI
+        - masterfit_keystore
         
     triggering:
       events:
@@ -32,15 +35,57 @@ workflows:
           # Generates the native 'android' directory without running redundant npm installs
           npx expo prebuild --platform android --no-install
           
-      - name: Build Android Debug APK
+      - name: Configure Android Signing
         script: |
-          # Navigates to the generated native folder and compiles the APK
+          # Dynamically configures the generated build.gradle to use Codemagic signing credentials
+          node -e '
+            const fs = require("fs");
+            const file = "android/app/build.gradle";
+            if (!fs.existsSync(file)) {
+              console.error("build.gradle not found!");
+              process.exit(1);
+            }
+            let content = fs.readFileSync(file, "utf8");
+            const signingConfigsBlock = `
+    signingConfigs {
+        debug {
+            storeFile file("debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+        release {
+            if (System.getenv("CM_KEYSTORE_PATH")) {
+                storeFile file(System.getenv("CM_KEYSTORE_PATH"))
+                storePassword System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("CM_KEY_ALIAS")
+                keyPassword System.getenv("CM_KEY_PASSWORD")
+            } else {
+                storeFile file("debug.keystore")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
+        }
+    }
+            `;
+            content = content.replace(/signingConfigs\s*\{[\s\S]*?\}\s*\}\s*buildTypes/g, signingConfigsBlock.trim() + "\n    buildTypes");
+            content = content.replace(/buildTypes\s*\{[\s\S]*\}/, (buildTypesMatch) => {
+                return buildTypesMatch.replace(/release\s*\{([\s\S]*?)signingConfig\s+signingConfigs\.debug/, "release {$1signingConfig signingConfigs.release");
+            });
+            fs.writeFileSync(file, content, "utf8");
+            console.log("Android signing configuration updated successfully.");
+          '
+          
+      - name: Build Android Release APK
+        script: |
+          # Navigates to the generated native folder and compiles the Release APK
           cd android
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
           
     artifacts:
-      # Upload the compiled APK so you can download and install it on your device
-      - android/app/build/outputs/apk/debug/*.apk
+      # Upload the compiled Release APK so you can download and install it on your device
+      - android/app/build/outputs/apk/release/*.apk
       
     publishing:
       email:
