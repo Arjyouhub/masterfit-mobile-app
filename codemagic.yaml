@@ -15,9 +15,10 @@ workflows:
       vars:
         # Default environment variables for Android build
         PACKAGE_NAME: "com.anonymous.mobileapp"
-      android_signing:
-        # Reference name of the keystore uploaded in Codemagic UI
-        - masterfit_keystore
+      # To sign your release build with a production keystore, upload the keystore in the Codemagic UI and uncomment the lines below:
+      # android_signing:
+      #   # Reference name of the keystore uploaded in Codemagic UI
+      #   - masterfit_keystore
         
     triggering:
       events:
